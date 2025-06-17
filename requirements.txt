@@ -1,0 +1,10 @@
+langchain
+chromadb
+faiss-cpu
+watchdog
+pypdf
+python-docx
+langchain_community
+docx2txt
+langchain-ollama
+langchain-chroma
