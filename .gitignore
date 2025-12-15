@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# VS Code
+.vscode/
+
+# Local app runtime/state (RAG)
+chroma_store/
+uploads/
+file_index.json
+
+# OS / temp
+.DS_Store
+Thumbs.db
