@@ -84,8 +84,9 @@ def ask_query():
         if query.lower() in ["exit", "quit"]:
             break
         try:
-            answer = answer_query(query)
-
+            result = qa_chain.invoke({"query": query})
+            answer = result.get("result") or result.get("output_text") or "No answer generated"
             print("🤖", answer)
         except Exception as e:
             print("❌ Error:", e)
+            
