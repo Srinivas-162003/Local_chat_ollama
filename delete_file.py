@@ -1,6 +1,6 @@
 import logging
-from langchain.vectorstores import Chroma
-from langchain.embeddings import OllamaEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import OllamaEmbeddings
 from utils import remove_from_index
 
 logger = logging.getLogger(__name__)
