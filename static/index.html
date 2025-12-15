@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Local Chat with Ollama</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="glow" aria-hidden="true"></div>
+    <header class="hero">
+      <span class="badge">Local · Private · Fast</span>
+      <h1>Chat with your documents using your own machine.</h1>
+      <p>Drop PDFs or Word files, we embed them locally with Ollama and answer your questions without sending data to the cloud.</p>
+    </header>
+
+    <main class="grid">
+      <section class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Documents</div>
+          <div class="tag" id="fileCount">0 files</div>
+        </div>
+        <div class="upload-body">
+          <div class="dropzone" id="dropzone">
+            <input type="file" id="fileInput" accept=".pdf,.docx" hidden />
+            <div class="small">Drag & drop</div>
+            <h3>Upload PDF or DOCX</h3>
+            <p>We will chunk, embed, and index automatically.</p>
+          </div>
+          <button class="button" id="chooseBtn" type="button">Browse files</button>
+          <div class="file-list" id="fileList">
+            <div class="small">No documents yet. Upload to get started.</div>
+          </div>
+          <div class="small">Files are stored in <code>uploads/</code> and processed locally.</div>
+        </div>
+      </section>
+
+      <section class="panel chat">
+        <div class="panel-header">
+          <div class="panel-title">Ask your documents</div>
+          <div class="tag" id="statusTag">Ready</div>
+        </div>
+        <div class="chat-window" id="chatWindow">
+          <div class="bubble bot">Hi! Upload a document, then ask me anything about it.</div>
+        </div>
+        <form class="form" id="chatForm">
+          <input class="input" id="questionInput" placeholder="Ask something..." autocomplete="off" />
+          <button class="button" type="submit">Send</button>
+        </form>
+        <details class="debug-panel">
+          <summary>🔍 Debug Retrieval</summary>
+          <div class="debug-content">
+            <input class="input" id="debugInput" placeholder="Test retrieval..." autocomplete="off" />
+            <button class="button" id="debugBtn" type="button">Retrieve</button>
+            <div id="debugOutput" class="debug-output"></div>
+          </div>
+        </details>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
