@@ -1,6 +1,6 @@
 import logging
 from langchain_community.llms import Ollama
-from langchain.chains.retrieval_qa.base import RetrievalQA
+from langchain.chains.retrieval_qa.base import RetrievalQA # type: ignore
 from langchain_core.prompts import PromptTemplate
 from processor import get_retriever
 
