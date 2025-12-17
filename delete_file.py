@@ -6,7 +6,7 @@ from utils import remove_from_index
 logger = logging.getLogger(__name__)
 
 VECTOR_DB_DIR = "chroma_store"
-EMBED_MODEL = "llama3.1:8b"
+EMBED_MODEL = "llama3.2:latest"  # Must match processor.py
 
 
 def delete_file(file_name):

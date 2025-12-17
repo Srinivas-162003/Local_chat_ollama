@@ -1,12 +1,12 @@
 import logging
 from langchain_community.llms import Ollama
-from langchain.chains import RetrievalQA
+from langchain.chains.retrieval_qa.base import RetrievalQA
 from langchain_core.prompts import PromptTemplate
 from processor import get_retriever
 
 logger = logging.getLogger(__name__)
 
-llm = Ollama(model="llama3.1:8b")
+llm = Ollama(model="llama3.2:latest")
 retriever = get_retriever()
 
 # Custom prompt to guide the LLM better
@@ -40,42 +40,30 @@ qa_chain = RetrievalQA.from_chain_type(
     llm=llm,
     chain_type="stuff",
     retriever=retriever,
-    return_source_documents=True,
-    chain_type_kwargs={"prompt": PROMPT}
+    chain_type_kwargs={"prompt": PROMPT},
+    return_source_documents=True
 )
 
-
-def answer_query(query: str) -> str:
-    """Run a query against the document retriever and return the answer text."""
+def answer_query(question: str) -> str:
+    """Answer a question based on indexed documents."""
     try:
-        result = qa_chain({"query": query})
-        source_docs = result.get('source_documents', [])
-        logger.info(f"Query: {query}")
-        logger.info(f"Sources: {[doc.metadata.get('source_file', 'unknown') for doc in source_docs]}")
+        result = qa_chain.invoke({"query": question})
+        answer = result.get("result", "")
         
-        # Check if any documents were actually retrieved
-        if not source_docs or len(source_docs) == 0:
-            return (
-                "[ERROR] No relevant documents were retrieved for this question. "
-                "Try rephrasing, or adjust retrieval settings (e.g., lower RETRIEVER_SCORE_THRESHOLD, increase RETRIEVER_K)."
-            )
+        # Safety check: if no source documents found, warn the user
+        source_docs = result.get("source_documents", [])
+        if not source_docs:
+            logger.warning(f"No source documents retrieved for: {question}")
+            answer = "I couldn't find relevant information in the knowledge base to answer your question."
         
-        return result.get("result", "No answer generated")
+        return answer
     except Exception as e:
         logger.error(f"Error answering query: {e}")
         raise
 
-
-def debug_retrieve(query: str, k: int = 15) -> list:
-    """Debug function to see what documents are being retrieved."""
-    # Create a fresh retriever so debug can override k without restarting.
-    debug_retriever = get_retriever({"k": k})
-    docs = debug_retriever.get_relevant_documents(query)
-    logger.info(f"Retrieved {len(docs)} documents for query: {query}")
-    for i, doc in enumerate(docs[:k]):
-        logger.info(f"  Doc {i+1}: {doc.metadata.get('source_file', 'unknown')} - {doc.page_content[:100]}...")
-    return docs
-
+def debug_retrieve(question: str):
+    """Retrieve documents for debugging without generating an answer."""
+    return retriever.invoke(question)
 
 def ask_query():
     print("\n💬 Ask questions based on uploaded documents. Type 'exit' to stop.\n")
@@ -84,9 +72,7 @@ def ask_query():
         if query.lower() in ["exit", "quit"]:
             break
         try:
-            result = qa_chain.invoke({"query": query})
-            answer = result.get("result") or result.get("output_text") or "No answer generated"
+            answer = answer_query(query)
             print("🤖", answer)
         except Exception as e:
             print("❌ Error:", e)
-            

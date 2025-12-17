@@ -36,8 +36,9 @@ def _env_float(name: str, default: float) -> float:
         logger.warning(f"Invalid {name}={raw!r}; using {default}")
         return default
 
+
 try:
-    embedding_model = OllamaEmbeddings(model="llama3.1:8b")
+    embedding_model = OllamaEmbeddings(model="llama3.2:latest")
     vectordb = Chroma(persist_directory=VECTOR_DB_DIR, embedding_function=embedding_model)
     logger.info("Ollama embedding model loaded successfully")
 except Exception as e:
@@ -45,73 +46,69 @@ except Exception as e:
     embedding_model = None
     vectordb = None
 
-
 def process_file(file_path):
-    if embedding_model is None or vectordb is None:
-        logger.error("Ollama not available - cannot process file")
-        return
-    
     file_name = os.path.basename(file_path)
-    logger.info(f"Processing: {file_path}")
+    print(f"📄 Processing: {file_path}")
 
-    try:
-        if file_path.endswith(".pdf"):
-            loader = PyPDFLoader(file_path)
-        elif file_path.endswith(".docx"):
-            loader = Docx2txtLoader(file_path)
-        else:
-            logger.warning(f"Unsupported file: {file_path}")
-            return
-
-        docs = loader.load()
-        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-        chunks = splitter.split_documents(docs)
-
-        for i, chunk in enumerate(chunks):
-            chunk.metadata["source_file"] = file_name
-
-        vectordb.add_documents(chunks)
-        update_file_index(file_name, len(chunks))
-        logger.info(f"{file_name} added to vector store with {len(chunks)} chunks")
-    except Exception as e:
-        logger.error(f"Error processing {file_path}: {e}")
-
-
-def get_retriever(overrides: dict | None = None):
-    if vectordb is None:
-        raise RuntimeError("Vector database not initialized. Check Ollama connection.")
-
-    overrides = overrides or {}
-
-    # Retrieval configuration (restart server after changing env vars)
-    # - RETRIEVER_SEARCH_TYPE: mmr | similarity | similarity_score_threshold
-    # - RETRIEVER_K: number of chunks to return
-    # - RETRIEVER_FETCH_K: MMR candidate pool
-    # - RETRIEVER_LAMBDA_MULT: MMR relevance/diversity balance (1.0=relevance)
-    # - RETRIEVER_SCORE_THRESHOLD: only for similarity_score_threshold
-    search_type = (os.getenv("RETRIEVER_SEARCH_TYPE") or "mmr").strip().lower()
-    k = overrides.get("k", _env_int("RETRIEVER_K", 15))
-
-    if search_type == "mmr":
-        fetch_k = overrides.get("fetch_k", _env_int("RETRIEVER_FETCH_K", 60))
-        lambda_mult = overrides.get("lambda_mult", _env_float("RETRIEVER_LAMBDA_MULT", 0.8))
-        search_kwargs = {"k": k, "fetch_k": fetch_k, "lambda_mult": lambda_mult}
-    elif search_type == "similarity":
-        search_kwargs = {"k": k}
-    elif search_type == "similarity_score_threshold":
-        score_threshold = overrides.get(
-            "score_threshold",
-            _env_float("RETRIEVER_SCORE_THRESHOLD", 0.3),
-        )
-        search_kwargs = {"k": k, "score_threshold": score_threshold}
+    if file_path.endswith(".pdf"):
+        loader = PyPDFLoader(file_path)
+    elif file_path.endswith(".docx"):
+        loader = Docx2txtLoader(file_path)
     else:
-        logger.warning(
-            f"Unknown RETRIEVER_SEARCH_TYPE={search_type!r}; falling back to 'mmr'"
-        )
-        fetch_k = overrides.get("fetch_k", _env_int("RETRIEVER_FETCH_K", 60))
-        lambda_mult = overrides.get("lambda_mult", _env_float("RETRIEVER_LAMBDA_MULT", 0.8))
-        search_type = "mmr"
-        search_kwargs = {"k": k, "fetch_k": fetch_k, "lambda_mult": lambda_mult}
+        print(f"⚠️ Unsupported file: {file_path}")
+        return
 
-    logger.info(f"Retriever: type={search_type} kwargs={search_kwargs}")
-    return vectordb.as_retriever(search_type=search_type, search_kwargs=search_kwargs)
+    docs = loader.load()
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    chunks = splitter.split_documents(docs)
+
+    for i, chunk in enumerate(chunks):
+        chunk.metadata["source_file"] = file_name
+
+    vectordb.add_documents(chunks)
+    update_file_index(file_name, len(chunks))
+    print(f"✅ {file_name} added to vector store with {len(chunks)} chunks")
+
+def get_retriever(overrides=None):
+    """Get a retriever with optional configuration overrides.
+    
+    Config via environment variables:
+    - RETRIEVER_SEARCH_TYPE: 'similarity' (default), 'mmr', or 'similarity_score_threshold'
+    - RETRIEVER_K: number of chunks to retrieve (default: 15)
+    - RETRIEVER_FETCH_K: fetch this many before filtering for MMR (default: 20)
+    - RETRIEVER_LAMBDA_MULT: MMR diversity weight 0-1 (default: 0.5)
+    - RETRIEVER_SCORE_THRESHOLD: min similarity score for threshold mode (default: 0.5)
+    """
+    if vectordb is None:
+        raise RuntimeError("Vector database not initialized")
+    
+    search_type = os.getenv("RETRIEVER_SEARCH_TYPE", "similarity")
+    k = _env_int("RETRIEVER_K", 15)
+    fetch_k = _env_int("RETRIEVER_FETCH_K", 20)
+    lambda_mult = _env_float("RETRIEVER_LAMBDA_MULT", 0.5)
+    score_threshold = _env_float("RETRIEVER_SCORE_THRESHOLD", 0.5)
+    
+    if overrides:
+        search_type = overrides.get("search_type", search_type)
+        k = overrides.get("k", k)
+        fetch_k = overrides.get("fetch_k", fetch_k)
+        lambda_mult = overrides.get("lambda_mult", lambda_mult)
+        score_threshold = overrides.get("score_threshold", score_threshold)
+    
+    logger.info(f"Retriever config: search_type={search_type}, k={k}, fetch_k={fetch_k}, lambda_mult={lambda_mult}, threshold={score_threshold}")
+    
+    if search_type == "mmr":
+        return vectordb.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": k, "fetch_k": fetch_k, "lambda_mult": lambda_mult}
+        )
+    elif search_type == "similarity_score_threshold":
+        return vectordb.as_retriever(
+            search_type="similarity_score_threshold",
+            search_kwargs={"k": k, "score_threshold": score_threshold}
+        )
+    else:  # similarity
+        return vectordb.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": k}
+        )
