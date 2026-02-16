@@ -10,6 +10,12 @@ const statusTag = document.getElementById('statusTag');
 const debugInput = document.getElementById('debugInput');
 const debugBtn = document.getElementById('debugBtn');
 const debugOutput = document.getElementById('debugOutput');
+const claraMode = document.getElementById('claraMode');
+const claraSettings = document.getElementById('claraSettings');
+const maxIterations = document.getElementById('maxIterations');
+const maxHops = document.getElementById('maxHops');
+const iterLabel = document.getElementById('iterLabel');
+const hopsLabel = document.getElementById('hopsLabel');
 
 let sending = false;
 
@@ -160,23 +166,94 @@ async function handleQuestion(question) {
   const botBubble = addMessage('bot', '', true);
   setSending(true);
 
+  const useCLaRa = claraMode.checked;
+  const endpoint = useCLaRa ? '/api/clara-query' : '/api/query';
+  const body = useCLaRa 
+    ? { 
+        question, 
+        max_iterations: parseInt(maxIterations.value),
+        max_hops: parseInt(maxHops.value),
+        detailed: true 
+      }
+    : { question };
+
   try {
-    const res = await fetch('/api/query', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || 'Query failed');
     }
     const data = await res.json();
-    botBubble.textContent = data.answer || 'No answer returned.';
+    
+    if (useCLaRa && data.reasoning_steps) {
+      displayCLaRaResponse(botBubble, data);
+    } else {
+      botBubble.textContent = data.answer || 'No answer returned.';
+    }
   } catch (err) {
     botBubble.textContent = err.message || 'Something went wrong.';
   } finally {
     setSending(false);
     chatWindow.scrollTop = chatWindow.scrollHeight;
+  }
+}
+
+function displayCLaRaResponse(bubble, data) {
+  bubble.innerHTML = '';
+  bubble.className = 'bubble bot clara-response';
+  
+  // Main answer
+  const answerDiv = document.createElement('div');
+  answerDiv.className = 'clara-answer';
+  answerDiv.textContent = data.answer;
+  bubble.appendChild(answerDiv);
+  
+  // Metadata
+  const metaDiv = document.createElement('div');
+  metaDiv.className = 'clara-meta';
+  metaDiv.innerHTML = `
+    <span class="badge-small">🔄 ${data.total_iterations} iterations</span>
+    <span class="badge-small">🎯 ${(data.confidence * 100).toFixed(0)}% confidence</span>
+    <span class="badge-small">🔗 ${data.reasoning_steps.length} reasoning steps</span>
+  `;
+  bubble.appendChild(metaDiv);
+  
+  // Reasoning steps (collapsible)
+  if (data.reasoning_steps && data.reasoning_steps.length > 0) {
+    const stepsToggle = document.createElement('details');
+    stepsToggle.className = 'clara-steps';
+    const summary = document.createElement('summary');
+    summary.textContent = '🧠 View Reasoning Process';
+    stepsToggle.appendChild(summary);
+    
+    data.reasoning_steps.forEach((step, idx) => {
+      const stepDiv = document.createElement('div');
+      stepDiv.className = 'reasoning-step';
+      stepDiv.innerHTML = `
+        <div class="step-header">
+          <strong>Step ${step.step}</strong>
+          <span class="confidence-badge">${(step.confidence * 100).toFixed(0)}% confident</span>
+        </div>
+        <div class="step-query"><em>Query: ${step.query}</em></div>
+        <div class="step-answer">${step.answer}</div>
+        <div class="step-sources">Sources: ${step.sources.join(', ')}</div>
+      `;
+      stepsToggle.appendChild(stepDiv);
+    });
+    
+    bubble.appendChild(stepsToggle);
+  }
+  
+  // Clarifications if any
+  if (data.clarifications && data.clarifications.length > 0) {
+    const clarifDiv = document.createElement('div');
+    clarifDiv.className = 'clara-clarifications';
+    clarifDiv.innerHTML = `<strong>💡 Suggested clarifications:</strong><br>${data.clarifications.join('<br>')}`;
+    bubble.appendChild(clarifDiv);
   }
 }
 
@@ -229,6 +306,19 @@ debugBtn.addEventListener('click', async () => {
   } catch (err) {
     debugOutput.textContent = `Error: ${err.message}`;
   }
+});
+
+// CLaRa mode toggle handlers
+claraMode.addEventListener('change', (e) => {
+  claraSettings.style.display = e.target.checked ? 'block' : 'none';
+});
+
+maxIterations.addEventListener('input', (e) => {
+  iterLabel.textContent = e.target.value;
+});
+
+maxHops.addEventListener('input', (e) => {
+  hopsLabel.textContent = e.target.value;
 });
 
 fetchFiles();

@@ -8,6 +8,11 @@ langchain_community
 docx2txt
 langchain-ollama
 langchain-chroma
+langchain-huggingface
 fastapi
 uvicorn[standard]
 python-multipart
+sentence-transformers
+transformers
+torch
+python-dotenv

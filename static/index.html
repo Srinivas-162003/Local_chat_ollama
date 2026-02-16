@@ -41,8 +41,25 @@
           <div class="panel-title">Ask your documents</div>
           <div class="tag" id="statusTag">Ready</div>
         </div>
+        <div class="mode-selector">
+          <label class="mode-toggle">
+            <input type="checkbox" id="claraMode" />
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">CLaRa Mode (Advanced Multi-Hop Reasoning)</span>
+          </label>
+          <div class="clara-settings" id="claraSettings" style="display: none;">
+            <div class="setting-row">
+              <label>Retrieval Iterations: <span id="iterLabel">3</span></label>
+              <input type="range" id="maxIterations" min="1" max="5" value="3" />
+            </div>
+            <div class="setting-row">
+              <label>Reasoning Hops: <span id="hopsLabel">3</span></label>
+              <input type="range" id="maxHops" min="1" max="5" value="3" />
+            </div>
+          </div>
+        </div>
         <div class="chat-window" id="chatWindow">
-          <div class="bubble bot">Hi! Upload a document, then ask me anything about it.</div>
+          <div class="bubble bot">Hi! Upload a document, then ask me anything about it. Enable CLaRa mode for advanced multi-hop reasoning!</div>
         </div>
         <form class="form" id="chatForm">
           <input class="input" id="questionInput" placeholder="Ask something..." autocomplete="off" />

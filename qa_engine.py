@@ -1,28 +1,30 @@
 import logging
-from langchain_community.llms import Ollama
-from langchain.chains.retrieval_qa.base import RetrievalQA # type: ignore
+
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+
+try:
+    from langchain_ollama import OllamaLLM
+except ImportError:
+    from langchain_community.llms import Ollama as OllamaLLM
+
 from processor import get_retriever
 
 logger = logging.getLogger(__name__)
 
-llm = Ollama(model="llama3.2:latest")
-retriever = get_retriever()
+_llm = None
+_retriever = None
+_rag_chain = None
 
-# Custom prompt to guide the LLM better
 PROMPT_TEMPLATE = """You are a detailed and thorough assistant answering questions based on provided documents.
 
 CRITICAL INSTRUCTIONS:
-1. ONLY answer using information from the provided context chunks
-2. ALWAYS provide COMPLETE information - list ALL items mentioned in the context
-3. For education: Include ALL schools/colleges, degrees, and date ranges
-4. For experience: Include ALL job positions/internships with dates and key achievements
-5. For projects: List ALL mentioned projects
-6. If information exists in context, provide it fully - never say "only mention" when there's more
-7. Use bullet points or numbering to organize information clearly
-8. If the context does NOT contain information to answer the question, state clearly: "This information is not available in the provided documents"
-9. Do NOT make up, assume, or infer information not explicitly stated in the context
-10. Do NOT say "it can be inferred" or "it could imply" - only state what is explicitly written
+1. Only answer using information from the provided context chunks.
+2. Always provide complete information found in context.
+3. If context does not contain the answer, say:
+"This information is not available in the provided documents."
+4. Do not infer or fabricate details.
 
 Context:
 {context}
@@ -33,46 +35,71 @@ Answer:"""
 
 PROMPT = PromptTemplate(
     template=PROMPT_TEMPLATE,
-    input_variables=["context", "question"]
+    input_variables=["context", "question"],
 )
 
-qa_chain = RetrievalQA.from_chain_type(
-    llm=llm,
-    chain_type="stuff",
-    retriever=retriever,
-    chain_type_kwargs={"prompt": PROMPT},
-    return_source_documents=True
-)
+
+def _get_llm():
+    global _llm
+    if _llm is None:
+        _llm = OllamaLLM(model="llama3.2:latest")
+    return _llm
+
+
+def _get_retriever():
+    global _retriever
+    if _retriever is None:
+        _retriever = get_retriever()
+    return _retriever
+
+
+def _format_docs(docs):
+    return "\n\n".join([doc.page_content for doc in docs])
+
+
+def _get_rag_chain():
+    global _rag_chain
+    if _rag_chain is None:
+        retriever = _get_retriever()
+        llm = _get_llm()
+        _rag_chain = (
+            {"context": retriever | _format_docs, "question": RunnablePassthrough()}
+            | PROMPT
+            | llm
+            | StrOutputParser()
+        )
+    return _rag_chain
+
 
 def answer_query(question: str) -> str:
     """Answer a question based on indexed documents."""
     try:
-        result = qa_chain.invoke({"query": question})
-        answer = result.get("result", "")
-        
-        # Safety check: if no source documents found, warn the user
-        source_docs = result.get("source_documents", [])
-        if not source_docs:
+        retriever = _get_retriever()
+        docs = retriever.invoke(question)
+        if not docs:
             logger.warning(f"No source documents retrieved for: {question}")
-            answer = "I couldn't find relevant information in the knowledge base to answer your question."
-        
-        return answer
-    except Exception as e:
-        logger.error(f"Error answering query: {e}")
+            return "I couldn't find relevant information in the knowledge base to answer your question."
+
+        rag_chain = _get_rag_chain()
+        return rag_chain.invoke(question)
+    except Exception as exc:
+        logger.error(f"Error answering query: {exc}")
         raise
 
+
 def debug_retrieve(question: str):
-    """Retrieve documents for debugging without generating an answer."""
+    retriever = _get_retriever()
     return retriever.invoke(question)
 
+
 def ask_query():
-    print("\n💬 Ask questions based on uploaded documents. Type 'exit' to stop.\n")
+    print("\nAsk questions based on uploaded documents. Type 'exit' to stop.\n")
     while True:
         query = input(">> ")
         if query.lower() in ["exit", "quit"]:
             break
         try:
             answer = answer_query(query)
-            print("🤖", answer)
-        except Exception as e:
-            print("❌ Error:", e)
+            print(answer)
+        except Exception as exc:
+            print(f"Error: {exc}")

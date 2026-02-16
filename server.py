@@ -95,6 +95,7 @@ async def upload_file(file: UploadFile = File(...)):
 
 @app.post("/api/query")
 def query_documents(payload: QueryRequest):
+    """Traditional RAG query endpoint"""
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question cannot be empty")
