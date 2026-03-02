@@ -22,3 +22,8 @@ file_index.json
 # OS / temp
 .DS_Store
 Thumbs.db
+
+*.sqlite3
+*.bin
+
+*.gitignore

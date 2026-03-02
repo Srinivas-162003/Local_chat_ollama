@@ -6,10 +6,10 @@ import logging
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from processor import UPLOAD_FOLDER
-from qa_engine import answer_query
+from clara_engine import answer_with_clara
 from utils import load_file_index
 from watcher import start_file_watcher
 
@@ -28,6 +28,13 @@ observer = None
 
 class QueryRequest(BaseModel):
     question: str
+
+
+class CLaRaQueryRequest(BaseModel):
+    question: str
+    max_iterations: int = Field(default=3, ge=1, le=8)
+    max_hops: int = Field(default=3, ge=1, le=8)
+    detailed: bool = True
 
 
 @app.on_event("startup")
@@ -95,16 +102,37 @@ async def upload_file(file: UploadFile = File(...)):
 
 @app.post("/api/query")
 def query_documents(payload: QueryRequest):
-    """Traditional RAG query endpoint"""
+    """Compatibility endpoint that routes to CLaRa."""
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
     try:
-        answer = answer_query(question)
+        answer = answer_with_clara(question, detailed_response=False)
     except Exception as exc:  # pragma: no cover - propagate clean error
         raise HTTPException(status_code=500, detail=f"Could not generate answer: {exc}")
 
+    return {"answer": answer}
+
+
+@app.post("/api/clara-query")
+def clara_query_documents(payload: CLaRaQueryRequest):
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    try:
+        answer = answer_with_clara(
+            question=question,
+            max_iterations=payload.max_iterations,
+            max_hops=payload.max_hops,
+            detailed_response=payload.detailed,
+        )
+    except Exception as exc:  # pragma: no cover - propagate clean error
+        raise HTTPException(status_code=500, detail=f"Could not generate CLaRa answer: {exc}")
+
+    if isinstance(answer, dict):
+        return answer
     return {"answer": answer}
 
 
@@ -179,14 +207,14 @@ def process_uploads(file_name: str | None = None):
 @app.post("/api/debug-query")
 def debug_query(payload: QueryRequest):
     """Debug endpoint to see retrieved documents."""
-    from qa_engine import debug_retrieve
+    from processor import get_retriever
     
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
     try:
-        docs = debug_retrieve(question)
+        docs = get_retriever().invoke(question)
         return {
             "query": question,
             "retrieved_count": len(docs),

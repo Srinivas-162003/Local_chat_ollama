@@ -10,8 +10,6 @@ const statusTag = document.getElementById('statusTag');
 const debugInput = document.getElementById('debugInput');
 const debugBtn = document.getElementById('debugBtn');
 const debugOutput = document.getElementById('debugOutput');
-const claraMode = document.getElementById('claraMode');
-const claraSettings = document.getElementById('claraSettings');
 const maxIterations = document.getElementById('maxIterations');
 const maxHops = document.getElementById('maxHops');
 const iterLabel = document.getElementById('iterLabel');
@@ -166,16 +164,13 @@ async function handleQuestion(question) {
   const botBubble = addMessage('bot', '', true);
   setSending(true);
 
-  const useCLaRa = claraMode.checked;
-  const endpoint = useCLaRa ? '/api/clara-query' : '/api/query';
-  const body = useCLaRa 
-    ? { 
-        question, 
-        max_iterations: parseInt(maxIterations.value),
-        max_hops: parseInt(maxHops.value),
-        detailed: true 
-      }
-    : { question };
+  const endpoint = '/api/clara-query';
+  const body = {
+    question,
+    max_iterations: parseInt(maxIterations.value),
+    max_hops: parseInt(maxHops.value),
+    detailed: true,
+  };
 
   try {
     const res = await fetch(endpoint, {
@@ -189,7 +184,7 @@ async function handleQuestion(question) {
     }
     const data = await res.json();
     
-    if (useCLaRa && data.reasoning_steps) {
+    if (data.reasoning_steps) {
       displayCLaRaResponse(botBubble, data);
     } else {
       botBubble.textContent = data.answer || 'No answer returned.';
@@ -306,11 +301,6 @@ debugBtn.addEventListener('click', async () => {
   } catch (err) {
     debugOutput.textContent = `Error: ${err.message}`;
   }
-});
-
-// CLaRa mode toggle handlers
-claraMode.addEventListener('change', (e) => {
-  claraSettings.style.display = e.target.checked ? 'block' : 'none';
 });
 
 maxIterations.addEventListener('input', (e) => {

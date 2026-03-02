@@ -10,6 +10,7 @@ Advanced RAG system with:
 """
 
 import logging
+import os
 from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass, field
 try:
@@ -28,7 +29,22 @@ _clara_engine = None
 def _get_llm():
     global _llm
     if _llm is None:
-        _llm = OllamaLLM(model="llama3.2:latest")
+        model_name = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+        num_gpu = int(os.getenv("OLLAMA_NUM_GPU", "1"))
+        temperature = float(os.getenv("OLLAMA_TEMPERATURE", "0.1"))
+        try:
+            _llm = OllamaLLM(
+                model=model_name,
+                num_gpu=num_gpu,
+                temperature=temperature,
+            )
+        except TypeError:
+            # Compatibility with older Ollama wrappers that do not accept num_gpu.
+            _llm = OllamaLLM(
+                model=model_name,
+                temperature=temperature,
+            )
+        logger.info(f"CLaRa LLM initialized: model={model_name}, num_gpu={num_gpu}")
     return _llm
 
 
@@ -94,27 +110,27 @@ SUGGESTED_CLARIFICATIONS: [questions to ask user, or 'none']
         """Analyze query complexity and ambiguity"""
         try:
             analysis_text = self.llm.invoke(self.prompt.format(question=question))
-            
-            # Parse the structured response
+            line_map = {}
+            for line in analysis_text.splitlines():
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                line_map[key.strip().upper()] = value.strip()
+
+            ambiguous = line_map.get("AMBIGUOUS", "no").lower()
+            multi_hop = line_map.get("MULTI_HOP", "no").lower()
+            concepts_line = line_map.get("KEY_CONCEPTS", "")
+            clarif_line = line_map.get("SUGGESTED_CLARIFICATIONS", "none")
+            assumptions_line = line_map.get("ASSUMPTIONS", "none")
+
             result = {
-                "is_ambiguous": "yes" in analysis_text.lower().split("ambiguous:")[1].split("\n")[0].lower(),
-                "requires_multi_hop": "yes" in analysis_text.lower().split("multi_hop:")[1].split("\n")[0].lower(),
-                "key_concepts": [],
-                "assumptions": [],
-                "clarifications": []
+                "is_ambiguous": "yes" in ambiguous,
+                "requires_multi_hop": "yes" in multi_hop,
+                "key_concepts": [c.strip() for c in concepts_line.split(",") if c.strip()],
+                "assumptions": [] if assumptions_line.lower() == "none" else [assumptions_line],
+                "clarifications": [] if clarif_line.lower() == "none" else [clarif_line],
             }
-            
-            # Extract key concepts
-            if "key_concepts:" in analysis_text.lower():
-                concepts_line = analysis_text.split("KEY_CONCEPTS:")[1].split("\n")[0]
-                result["key_concepts"] = [c.strip() for c in concepts_line.split(",") if c.strip()]
-            
-            # Extract clarifications
-            if "suggested_clarifications:" in analysis_text.lower():
-                clarif_line = analysis_text.split("SUGGESTED_CLARIFICATIONS:")[1].split("\n")[0]
-                if "none" not in clarif_line.lower():
-                    result["clarifications"] = [clarif_line.strip()]
-            
+
             return result
             
         except Exception as e:

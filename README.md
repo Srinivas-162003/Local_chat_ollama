@@ -8,12 +8,12 @@ A secure local PDF chat application powered by Ollama. Chat with your PDF docume
 
 Local_chat_ollama is a privacy-focused application that allows you to upload PDF documents and interact with them using AI. By leveraging Ollama to run Large Language Models (LLMs) locally on your machine, your sensitive data never leaves your computer - ensuring complete privacy and security.
 
-**New: CLaRa Mode** - Enable CLaRa (Contextualized Language Retrieval and Answering) for advanced multi-hop reasoning, iterative retrieval, and better handling of complex questions. See [CLARA_UPGRADE.md](CLARA_UPGRADE.md) for details.
+**CLaRa Engine** - Uses CLaRa (Contextualized Language Retrieval and Answering) for iterative retrieval, multi-hop reasoning, and better handling of complex questions. See [CLARA_UPGRADE.md](CLARA_UPGRADE.md) for details.
 
 ## Features
 
 - **PDF Upload & Chat**: Upload PDF documents and ask questions about their content
-- **CLaRa Enhanced**: Toggle between traditional RAG and advanced CLaRa mode with multi-hop reasoning
+- **CLaRa-Only Reasoning**: Advanced multi-hop reasoning with iterative retrieval
 - **Iterative Retrieval**: Query refinement across multiple passes for better context
 - **Evidence Tracking**: Full attribution of sources for each claim
 - **Complete Privacy**: All processing happens locally - your data stays on your machine

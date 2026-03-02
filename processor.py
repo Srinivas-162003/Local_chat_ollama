@@ -1,14 +1,13 @@
 import logging
 import os
+import shutil
+import sys
+from datetime import datetime
 
 from dotenv import load_dotenv
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-try:
-    from langchain_huggingface import HuggingFaceEmbeddings
-except ImportError:
-    from langchain_community.embeddings import HuggingFaceEmbeddings
 
 try:
     from langchain_chroma import Chroma
@@ -31,6 +30,131 @@ os.makedirs(VECTOR_DB_DIR, exist_ok=True)
 _embedding_model = None
 _vectordb = None
 _init_error = None
+
+
+def _get_embedding_dimension() -> int:
+    if _embedding_model is None:
+        raise RuntimeError("Embedding model is not initialized")
+    sample_vec = _embedding_model.embed_query("dimension probe")
+    return len(sample_vec)
+
+
+def _get_collection_dimension(vectordb) -> int | None:
+    try:
+        collection = vectordb._collection
+    except Exception:
+        return None
+
+    # Chroma internals can vary by version; try a few known places.
+    try:
+        model = getattr(collection, "_model", None)
+        if model is not None:
+            dim = getattr(model, "dimension", None)
+            if isinstance(dim, int):
+                return dim
+    except Exception:
+        pass
+
+    try:
+        metadata = getattr(collection, "metadata", None)
+        if isinstance(metadata, dict):
+            dim = metadata.get("dimension") or metadata.get("embedding_dimension")
+            if isinstance(dim, int):
+                return dim
+            if isinstance(dim, str) and dim.isdigit():
+                return int(dim)
+    except Exception:
+        pass
+
+    return None
+
+
+def _ensure_compatible_dimensions() -> None:
+    global _vectordb
+
+    if _vectordb is None:
+        return
+
+    expected_dim = _get_embedding_dimension()
+    actual_dim = _get_collection_dimension(_vectordb)
+
+    if actual_dim is not None and actual_dim != expected_dim:
+        logger.warning(
+            "Vector store dimension mismatch detected: "
+            f"collection={actual_dim}, embedding={expected_dim}"
+        )
+        _rotate_vector_store()
+        _vectordb = Chroma(
+            persist_directory=VECTOR_DB_DIR,
+            embedding_function=_embedding_model,
+        )
+        return
+
+    # Force a tiny query via raw collection API so mismatch is detected early.
+    try:
+        _vectordb._collection.query(query_embeddings=[[0.0] * expected_dim], n_results=1)
+    except Exception as exc:
+        if _is_dimension_mismatch_error(exc):
+            logger.warning(f"Vector store dimension mismatch detected: {exc}")
+            _rotate_vector_store()
+            _vectordb = Chroma(
+                persist_directory=VECTOR_DB_DIR,
+                embedding_function=_embedding_model,
+            )
+        else:
+            raise
+
+
+def _is_dimension_mismatch_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    keywords = [
+        "dimension",
+        "dimensions",
+        "dimensionality",
+        "embedding dimension",
+    ]
+    return any(token in msg for token in keywords)
+
+
+def _reset_index_file() -> None:
+    try:
+        with open("file_index.json", "w", encoding="utf-8") as f:
+            f.write("{}")
+    except Exception as exc:
+        logger.warning(f"Could not reset file_index.json: {exc}")
+
+
+def _rotate_vector_store() -> None:
+    global VECTOR_DB_DIR
+
+    if not os.path.exists(VECTOR_DB_DIR):
+        return
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_dir = f"{VECTOR_DB_DIR}_backup_{timestamp}"
+
+    try:
+        shutil.move(VECTOR_DB_DIR, backup_dir)
+        os.makedirs(VECTOR_DB_DIR, exist_ok=True)
+        _reset_index_file()
+        logger.warning(
+            "Detected incompatible embedding dimensions. "
+            f"Rotated old vector store to '{backup_dir}' and created a fresh store. "
+            "Please re-upload or re-process your documents."
+        )
+    except PermissionError:
+        # If another process still holds the sqlite file, switch to a new directory
+        # for this process so queries can proceed immediately.
+        fresh_dir = f"{VECTOR_DB_DIR}_fresh_{timestamp}"
+        os.makedirs(fresh_dir, exist_ok=True)
+        VECTOR_DB_DIR = fresh_dir
+        _reset_index_file()
+        logger.warning(
+            "Detected incompatible embedding dimensions, but existing vector "
+            "store is locked by another process. "
+            f"Switched to fresh vector store '{VECTOR_DB_DIR}'. "
+            "Please restart other server instances and re-process your documents."
+        )
 
 
 def _env_int(name: str, default: int) -> int:
@@ -56,18 +180,17 @@ def _env_float(name: str, default: float) -> float:
 
 
 def _detect_device() -> str:
-    device = os.getenv("EMBEDDING_DEVICE", "auto")
-    if device != "auto":
-        return device
+    device = os.getenv("EMBEDDING_DEVICE", "cuda").strip().lower()
+    if device == "auto":
+        try:
+            import torch
 
-    try:
-        import torch
-
-        auto_device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"Auto-detected embedding device: {auto_device}")
-        return auto_device
-    except Exception:
-        return "cpu"
+            auto_device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"Auto-detected embedding device: {auto_device}")
+            return auto_device
+        except Exception:
+            return "cpu"
+    return device
 
 
 def _initialize_vector_store() -> None:
@@ -80,23 +203,60 @@ def _initialize_vector_store() -> None:
 
     device = _detect_device()
     try:
+        if device == "cuda":
+            try:
+                import torch
+
+                if not torch.cuda.is_available():
+                    logger.warning(
+                        "EMBEDDING_DEVICE is set to CUDA but CUDA is not available. "
+                        "Falling back to CPU embeddings."
+                    )
+                    device = "cpu"
+            except Exception:
+                logger.warning(
+                    "Could not validate CUDA availability. Falling back to CPU embeddings."
+                )
+                device = "cpu"
+
         _embedding_model = HuggingFaceEmbeddings(
             model_name=EMBEDDING_MODEL_NAME,
             model_kwargs={"device": device},
             encode_kwargs={"normalize_embeddings": True},
         )
-        _vectordb = Chroma(
-            persist_directory=VECTOR_DB_DIR,
-            embedding_function=_embedding_model,
-        )
+        try:
+            _vectordb = Chroma(
+                persist_directory=VECTOR_DB_DIR,
+                embedding_function=_embedding_model,
+            )
+            _ensure_compatible_dimensions()
+        except Exception as chroma_exc:
+            if _is_dimension_mismatch_error(chroma_exc):
+                logger.warning(f"Vector store dimension mismatch detected: {chroma_exc}")
+                _rotate_vector_store()
+                _vectordb = Chroma(
+                    persist_directory=VECTOR_DB_DIR,
+                    embedding_function=_embedding_model,
+                )
+            else:
+                raise
         logger.info(f"Embedding model loaded on {device.upper()}")
         logger.info(f"Vector database initialized at {VECTOR_DB_DIR}")
     except Exception as exc:
+        if isinstance(exc, ImportError) or "sentence_transformers" in str(exc):
+            env_hint = (
+                f"Current Python executable: {sys.executable}. "
+                "If this is not your project venv, run the server with: "
+                "D:/Local-ollama/.venv/Scripts/python.exe server.py"
+            )
+        else:
+            env_hint = ""
+
         _init_error = (
             "Embeddings/vector DB initialization failed. "
             "Install project dependencies in the active Python environment "
             "(for this repo: `pip install -r requirements.txt`). "
-            f"Original error: {exc}"
+            f"Original error: {exc}. {env_hint}"
         )
         logger.error(_init_error)
         raise RuntimeError(_init_error) from exc
